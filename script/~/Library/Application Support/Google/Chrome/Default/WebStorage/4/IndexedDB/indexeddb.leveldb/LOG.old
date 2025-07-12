@@ -1,0 +1,6 @@
+2025/07/12-15:14:29.667 5d33f2 Creating DB /Users/richardyang/Documents/turo_crawler/script/~/Library/Application Support/Google/Chrome/Default/WebStorage/4/IndexedDB/indexeddb.leveldb since it was missing.
+2025/07/12-15:14:29.671 5d33f2 Reusing MANIFEST /Users/richardyang/Documents/turo_crawler/script/~/Library/Application Support/Google/Chrome/Default/WebStorage/4/IndexedDB/indexeddb.leveldb/MANIFEST-000001
+2025/07/12-15:24:34.394 5d33f4 Level-0 table #5: started
+2025/07/12-15:24:34.396 5d33f4 Level-0 table #5: 8450 bytes OK
+2025/07/12-15:24:34.397 5d33f4 Delete type=0 #3
+2025/07/12-15:24:34.397 5d33f4 Manual compaction at level-0 from (begin) .. (end); will stop at (end)
