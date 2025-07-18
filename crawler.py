@@ -145,7 +145,8 @@ class TuroCrawler:
     async def navigate_and_return(self, hrefs: List[Dict[str, str]], 
                                  take_screenshot: bool = True,
                                  extract_data: bool = True,
-                                 delay_between_navigation: float = 1.0) -> List[Dict[str, Any]]:
+                                 delay_between_navigation: float = 1.0,
+                                 customUrlAppend: str = "") -> List[Dict[str, Any]]:
         """
         Navigate to each href in the list and return to the original page after each navigation.
         
@@ -161,6 +162,7 @@ class TuroCrawler:
         if not self.page:
             raise RuntimeError("No page connected. Call connect_to_browser() first.")
         
+        old_page = self.page
         original_url = self.page.url
         results = []
         
@@ -174,7 +176,16 @@ class TuroCrawler:
                 logger.info(f"Navigating to {i+1}/{len(hrefs)}: {link_text} -> {href}")
                 
                 # Navigate to the href
-                await self.page.goto(href, wait_until='networkidle')
+                # await self.page.goto(href + customUrlAppend)
+                # Open new tab
+                new_page = await self.open_new_tab()
+                if not new_page:
+                    raise RuntimeError("Failed to open new tab")
+
+                # Navigate to URL
+                logger.info(f"Navigating to {href} in new tab")
+                await new_page.goto(href + customUrlAppend)
+                self.page = new_page
                 
                 # Wait a bit for the page to fully load
                 await asyncio.sleep(delay_between_navigation)
@@ -190,8 +201,9 @@ class TuroCrawler:
                 
                 # Take screenshot if requested
                 if take_screenshot:
-                    screenshot_filename = f"navigation_{i+1:03d}_{link_text[:30].replace(' ', '_')}.png"
-                    screenshot_path = await self.take_screenshot(screenshot_filename)
+                    screenshot_filename = f"{i+1:03d}_{link_text[:30].replace(' ', '_')}.png"
+                    #screenshot_path = await self.take_screenshot(screenshot_filename)
+                    screenshot_path = await self.take_element_screenshot(selector=f"div[data-testid=receipt]", filename=screenshot_filename)
                     result["screenshot_path"] = screenshot_path
                 
                 # Extract data if requested
@@ -213,18 +225,27 @@ class TuroCrawler:
                     "error": str(e),
                     "timestamp": datetime.now().isoformat()
                 })
+            finally:
+                # Close the new tab and return to original page
+                if new_page:
+                    try:
+                        self.page = old_page
+                        await new_page.close()
+                        logger.info("Closed new tab and returned to original page")
+                    except Exception as e:
+                        logger.error(f"Failed to close new tab: {e}")
             
             # Go back to the original page
-            try:
-                await self.page.goto(original_url, wait_until='networkidle')
-                await asyncio.sleep(0.5)  # Brief pause after going back
-                logger.info(f"Returned to original page: {original_url}")
-            except Exception as e:
-                logger.error(f"Failed to return to original page: {e}")
-                # Try to reconnect if we lost connection
-                if not await self.connect_to_browser():
-                    logger.error("Failed to reconnect to browser, stopping navigation")
-                    break
+            # try:
+            #     await self.page.goto(original_url, wait_until='networkidle')
+            #     await asyncio.sleep(0.5)  # Brief pause after going back
+            #     logger.info(f"Returned to original page: {original_url}")
+            # except Exception as e:
+            #     logger.error(f"Failed to return to original page: {e}")
+            #     # Try to reconnect if we lost connection
+            #     if not await self.connect_to_browser():
+            #         logger.error("Failed to reconnect to browser, stopping navigation")
+            #         break
         
         logger.info(f"Completed navigation through {len(hrefs)} hrefs")
         return results
@@ -233,6 +254,7 @@ class TuroCrawler:
                                               take_screenshot: bool = True,
                                               extract_data: bool = True,
                                               delay_between_navigation: float = 1.0,
+                                              customUrlAppend: str = "",
                                               max_links: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Navigate through all hrefs found by a specific selector and return after each navigation.
@@ -270,8 +292,107 @@ class TuroCrawler:
         
         logger.info(f"Found {len(hrefs)} hrefs matching selector: {selector}")
         
-        return await self.navigate_and_return(hrefs, take_screenshot, extract_data, delay_between_navigation)
+        return await self.navigate_and_return(hrefs, take_screenshot, extract_data, delay_between_navigation, customUrlAppend)
     
+    async def open_new_tab(self) -> Optional[Page]:
+        """
+        Open a new tab in the browser.
+        
+        Returns:
+            The new page object, or None if failed
+        """
+        if not self.context:
+            raise RuntimeError("No browser context connected. Call connect_to_browser() first.")
+        
+        try:
+            new_page = await self.context.new_page()
+            logger.info(f"Opened new tab: {new_page.url}")
+            return new_page
+        except Exception as e:
+            logger.error(f"Failed to open new tab: {e}")
+            return None
+
+    async def navigate_in_new_tab(self, url: str, 
+                                take_screenshot: bool = True,
+                                extract_data: bool = True,
+                                wait_for_load: bool = True) -> Dict[str, Any]:
+        """
+        Open a new tab, navigate to a URL, and return to the original page.
+        
+        Args:
+            url: URL to navigate to
+            take_screenshot: Whether to take a screenshot
+            extract_data: Whether to extract page data
+            wait_for_load: Whether to wait for page to load
+            
+        Returns:
+            Dictionary containing results from the new tab
+        """
+        if not self.page:
+            raise RuntimeError("No page connected. Call connect_to_browser() first.")
+        
+        original_page = self.page
+        new_page = None
+        
+        try:
+            # Open new tab
+            new_page = await self.open_new_tab()
+            if not new_page:
+                raise RuntimeError("Failed to open new tab")
+            
+            # Navigate to URL
+            logger.info(f"Navigating to {url} in new tab")
+            await new_page.goto(url, wait_until='networkidle' if wait_for_load else 'domcontentloaded')
+            
+            # Prepare result
+            result = {
+                "url": url,
+                "current_url": new_page.url,
+                "page_title": await new_page.title(),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Take screenshot if requested
+            if take_screenshot:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_filename = f"new_tab_{timestamp}.png"
+                screenshot_path = self.output_dir / "screenshots" / screenshot_filename
+                await new_page.screenshot(path=str(screenshot_path), full_page=True)
+                result["screenshot_path"] = str(screenshot_path)
+                logger.info(f"New tab screenshot saved: {screenshot_path}")
+            
+            # Extract data if requested
+            if extract_data:
+                # Temporarily switch to new page for data extraction
+                self.page = new_page
+                page_data = await self.get_page_data()
+                data_filename = f"new_tab_data_{timestamp}.json"
+                data_path = await self.save_page_data(page_data, data_filename)
+                result["data_path"] = data_path
+                result["page_data"] = page_data
+                # Switch back to original page
+                self.page = original_page
+            
+            logger.info(f"Successfully processed new tab: {url}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to navigate in new tab to {url}: {e}")
+            return {
+                "url": url,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        finally:
+            # Close the new tab and return to original page
+            if new_page:
+                try:
+                    await new_page.close()
+                    logger.info("Closed new tab and returned to original page")
+                except Exception as e:
+                    logger.error(f"Failed to close new tab: {e}")
+
+
     async def take_screenshot(self, filename: Optional[str] = None) -> str:
         """
         Take a screenshot of the current page.
@@ -296,6 +417,44 @@ class TuroCrawler:
         logger.info(f"Screenshot saved: {screenshot_path}")
         
         return str(screenshot_path)
+
+    async def take_element_screenshot(self, selector: str, filename: Optional[str] = None) -> str:
+        """
+        Take a screenshot of a specific element (like a div) using CSS selector.
+        
+        Args:
+            selector: CSS selector for the element (e.g., '#my-div', '.content-box', 'div[data-testid="product-card"]')
+            filename: Optional filename for the screenshot
+            
+        Returns:
+            Path to the saved screenshot
+        """
+        if not self.page:
+            raise RuntimeError("No page connected. Call connect_to_browser() first.")
+        
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            element_name = selector.replace('[', '_').replace(']', '_').replace('=', '_').replace('"', '_').replace("'", '_').replace('.', '_').replace('#', '_').replace(' ', '_')
+            filename = f"element_{element_name}_{timestamp}.png"
+        
+        screenshot_path = self.output_dir / "screenshots" / filename
+        
+        try:
+            # Wait for the element to be present
+            await self.page.wait_for_selector(selector, timeout=5000)
+            
+            # Take screenshot of the specific element
+            element = await self.page.query_selector(selector)
+            if element:
+                await element.screenshot(path=str(screenshot_path))
+                logger.info(f"Element screenshot saved: {screenshot_path}")
+                return str(screenshot_path)
+            else:
+                raise RuntimeError(f"Element with selector '{selector}' not found")
+                
+        except Exception as e:
+            logger.error(f"Failed to take element screenshot for '{selector}': {e}")
+            raise
     
     async def get_page_data(self) -> Dict[str, Any]:
         """

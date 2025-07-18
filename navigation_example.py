@@ -96,7 +96,7 @@ async def example_navigate_data_testid_links():
         # 
         data_testid_selectors = [
             # Specific data-testid values
-            "a[data-testid=vehicle-card-link-box]",
+            "a[data-testid=baseTripCard][class=css-14aw0o6-BaseTripCard]",
             #"a[data-testid='item-link']",
             #"a[data-testid='detail-link']",
             #"a[data-testid='view-link']",
@@ -127,9 +127,10 @@ async def example_navigate_data_testid_links():
                 results = await crawler.navigate_and_return_with_selector(
                     selector=selector,
                     take_screenshot=True,
-                    extract_data=True,
-                    delay_between_navigation=0.5,
-                    max_links=3  # Limit to 3 links per selector
+                    extract_data=False,
+                    delay_between_navigation=1.5,
+                    customUrlAppend="/receipt",
+                    max_links=200  # Limit to 3 links per selector
                 )
                 
                 if results:
